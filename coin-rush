@@ -1,0 +1,1116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>COIN RUSH — Run. Collect. Survive.</title>
+
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+
+html,body{
+  width:100%;
+  height:100%;
+  overflow:hidden;
+  background:#050510;
+  font-family:Arial,sans-serif;
+}
+
+canvas{
+  display:block;
+  width:100%;
+  height:100%;
+  background:#050510;
+}
+
+#menu{
+  position:fixed;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  background:
+    radial-gradient(circle at 50% 45%,#26105c 0,#09091b 45%,#020207 100%);
+  color:white;
+  z-index:10;
+}
+
+.panel{
+  width:min(90%,600px);
+  padding:40px;
+  border:1px solid #27e9ff;
+  border-radius:25px;
+  background:rgba(5,8,25,.82);
+  box-shadow:
+    0 0 30px #00d9ff55,
+    inset 0 0 40px #7b2cff22;
+}
+
+h1{
+  font-size:clamp(50px,10vw,100px);
+  font-style:italic;
+  font-weight:1000;
+  letter-spacing:-5px;
+  color:#fff;
+  text-shadow:
+    5px 5px 0 #08bfff,
+    0 0 30px #08bfff;
+}
+
+.tagline{
+  margin:5px 0 25px;
+  color:#ffcf32;
+  font-weight:bold;
+  letter-spacing:4px;
+}
+
+button{
+  border:0;
+  padding:17px 45px;
+  border-radius:12px;
+  color:white;
+  background:linear-gradient(90deg,#087dff,#b300ff);
+  font-size:20px;
+  font-weight:bold;
+  cursor:pointer;
+  box-shadow:0 0 25px #168cff88;
+}
+
+button:hover{
+  transform:scale(1.04);
+}
+
+.controls{
+  margin-top:25px;
+  color:#aeb9d4;
+  line-height:1.8;
+}
+
+#hud{
+  position:fixed;
+  top:18px;
+  left:18px;
+  right:18px;
+  display:none;
+  justify-content:space-between;
+  pointer-events:none;
+  z-index:5;
+  color:white;
+  font-weight:bold;
+  text-shadow:0 2px 4px black;
+}
+
+.hudBox{
+  background:#030713aa;
+  border:1px solid #28eaff77;
+  border-radius:12px;
+  padding:10px 15px;
+  backdrop-filter:blur(5px);
+}
+
+#gameOver{
+  display:none;
+  position:fixed;
+  inset:0;
+  z-index:20;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  color:white;
+  background:#0009;
+}
+
+#gameOver .panel{
+  border-color:#ff305f;
+}
+
+#finalScore{
+  color:#ffd52a;
+  font-size:35px;
+  margin:15px;
+}
+</style>
+</head>
+
+<body>
+
+<canvas id="game"></canvas>
+
+<div id="menu">
+  <div class="panel">
+    <h1>COIN RUSH</h1>
+    <div class="tagline">RUN. COLLECT. SURVIVE.</div>
+
+    <p style="color:#dce5ff;margin-bottom:25px">
+      The track gets faster. The obstacles get harder.
+      How long can you survive?
+    </p>
+
+    <button onclick="startGame()">START RUN</button>
+
+    <div class="controls">
+      ← → &nbsp; Move<br>
+      ↑ / SPACE &nbsp; Jump<br>
+      ↓ &nbsp; Slide<br>
+      Collect coins • Avoid hazards • Build your combo
+    </div>
+  </div>
+</div>
+
+<div id="hud">
+  <div class="hudBox">
+    🪙 <span id="coins">0</span>
+  </div>
+
+  <div class="hudBox">
+    SCORE <span id="score">0</span>
+  </div>
+
+  <div class="hudBox">
+    ❤️ <span id="lives">3</span>
+    &nbsp; 🔥 x<span id="combo">1</span>
+  </div>
+</div>
+
+<div id="gameOver">
+  <div class="panel">
+    <h1 style="font-size:60px">RUN OVER</h1>
+
+    <div id="finalScore">0</div>
+
+    <p id="bestText"></p>
+
+    <br>
+
+    <button onclick="startGame()">RUN AGAIN</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let W,H;
+let running=false;
+let score=0;
+let coins=0;
+let lives=3;
+let combo=1;
+let speed=7;
+let distance=0;
+let spawnTimer=0;
+let coinTimer=0;
+let shake=0;
+
+let keys={};
+
+const player={
+  x:0,
+  y:0,
+  w:38,
+  h:58,
+  vy:0,
+  jumping:false,
+  sliding:false,
+  invincible:0
+};
+
+let obstacles=[];
+let coinObjects=[];
+let particles=[];
+let stars=[];
+let powerups=[];
+
+function resize(){
+  W=canvas.width=innerWidth;
+  H=canvas.height=innerHeight;
+
+  player.x=W*.25;
+
+  if(!running)
+    player.y=H-145;
+}
+
+addEventListener("resize",resize);
+
+resize();
+
+/* ---------- INPUT ---------- */
+
+addEventListener("keydown",e=>{
+  keys[e.key.toLowerCase()]=true;
+
+  if(
+    e.key==="ArrowUp" ||
+    e.key===" " ||
+    e.key.toLowerCase()==="w"
+  ){
+    jump();
+    e.preventDefault();
+  }
+
+  if(
+    e.key==="ArrowDown" ||
+    e.key.toLowerCase()==="s"
+  ){
+    player.sliding=true;
+    e.preventDefault();
+  }
+});
+
+addEventListener("keyup",e=>{
+  keys[e.key.toLowerCase()]=false;
+
+  if(
+    e.key==="ArrowDown" ||
+    e.key.toLowerCase()==="s"
+  ){
+    player.sliding=false;
+  }
+});
+
+/* Mobile controls */
+
+canvas.addEventListener("touchstart",e=>{
+  const touch=e.touches[0];
+
+  if(touch.clientY < innerHeight*.45)
+    jump();
+  else
+    player.sliding=true;
+});
+
+canvas.addEventListener("touchend",()=>{
+  player.sliding=false;
+});
+
+function jump(){
+
+  if(!running) return;
+
+  if(!player.jumping){
+    player.vy=-17;
+    player.jumping=true;
+
+    for(let i=0;i<10;i++)
+      particle(player.x,player.y+player.h,"#38eaff");
+  }
+}
+
+/* ---------- START ---------- */
+
+function startGame(){
+
+  document.getElementById("menu").style.display="none";
+  document.getElementById("gameOver").style.display="none";
+  document.getElementById("hud").style.display="flex";
+
+  score=0;
+  coins=0;
+  lives=3;
+  combo=1;
+  speed=7;
+  distance=0;
+
+  obstacles=[];
+  coinObjects=[];
+  particles=[];
+  powerups=[];
+
+  player.x=W*.25;
+  player.y=H-145;
+  player.vy=0;
+  player.jumping=false;
+  player.sliding=false;
+  player.invincible=0;
+
+  running=true;
+
+  createStars();
+
+  requestAnimationFrame(loop);
+}
+
+/* ---------- BACKGROUND ---------- */
+
+function createStars(){
+
+  stars=[];
+
+  for(let i=0;i<120;i++){
+
+    stars.push({
+      x:Math.random()*W,
+      y:Math.random()*H*.75,
+      r:Math.random()*2,
+      s:.2+Math.random()*1.5
+    });
+  }
+}
+
+function drawBackground(){
+
+  const gradient=ctx.createLinearGradient(0,0,0,H);
+
+  gradient.addColorStop(0,"#06061c");
+  gradient.addColorStop(.55,"#10104a");
+  gradient.addColorStop(1,"#260516");
+
+  ctx.fillStyle=gradient;
+  ctx.fillRect(0,0,W,H);
+
+  /* stars */
+
+  for(const s of stars){
+
+    s.x-=s.s*speed/7;
+
+    if(s.x<0){
+      s.x=W;
+      s.y=Math.random()*H*.7;
+    }
+
+    ctx.fillStyle="rgba(255,255,255,.7)";
+    ctx.beginPath();
+    ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  /* distant city */
+
+  const cityY=H*.52;
+
+  for(let x=0;x<W;x+=55){
+
+    const height=60+Math.random()*130;
+
+    ctx.fillStyle="#080a28";
+    ctx.fillRect(x,cityY-height,42,height);
+
+    ctx.fillStyle="#20d9ff55";
+
+    for(let y=cityY-height+15;y<cityY;y+=22){
+      if(Math.random()>.35)
+        ctx.fillRect(x+10,y,6,5);
+    }
+  }
+}
+
+/* ---------- TRACK ---------- */
+
+function drawTrack(){
+
+  const horizon=H*.52;
+  const bottom=H;
+
+  /* lava */
+
+  ctx.fillStyle="#260006";
+  ctx.fillRect(0,horizon,W,H-horizon);
+
+  for(let i=0;i<20;i++){
+
+    const x=(i*130-distance*.7)%W;
+
+    ctx.fillStyle=i%2
+      ? "#ff301822"
+      : "#ff7b001c";
+
+    ctx.fillRect(x,horizon+30,90,H-horizon);
+  }
+
+  /* road */
+
+  ctx.beginPath();
+  ctx.moveTo(W*.37,horizon);
+  ctx.lineTo(W*.63,horizon);
+  ctx.lineTo(W*.88,bottom);
+  ctx.lineTo(W*.12,bottom);
+  ctx.closePath();
+
+  const road=ctx.createLinearGradient(0,horizon,0,H);
+  road.addColorStop(0,"#10152d");
+  road.addColorStop(1,"#050711");
+
+  ctx.fillStyle=road;
+  ctx.fill();
+
+  /* neon edges */
+
+  ctx.strokeStyle="#18ddff";
+  ctx.lineWidth=5;
+
+  ctx.beginPath();
+  ctx.moveTo(W*.37,horizon);
+  ctx.lineTo(W*.12,bottom);
+  ctx.stroke();
+
+  ctx.strokeStyle="#ff2f75";
+
+  ctx.beginPath();
+  ctx.moveTo(W*.63,horizon);
+  ctx.lineTo(W*.88,bottom);
+  ctx.stroke();
+
+  /* speed lines */
+
+  for(let i=0;i<12;i++){
+
+    const y=horizon+((i*100+distance*4)%500);
+
+    const progress=(y-horizon)/(H-horizon);
+
+    const left=W*.37-(W*.25*progress);
+    const right=W*.63+(W*.25*progress);
+
+    ctx.strokeStyle="#27dfff55";
+    ctx.lineWidth=2;
+
+    ctx.beginPath();
+    ctx.moveTo(left,y);
+    ctx.lineTo(right,y);
+    ctx.stroke();
+  }
+}
+
+/* ---------- PLAYER ---------- */
+
+function drawPlayer(){
+
+  const h=player.sliding ? 34 : player.h;
+  const y=player.y+(player.h-h);
+
+  if(player.invincible>0 && Math.floor(player.invincible/5)%2===0)
+    return;
+
+  /* glow */
+
+  ctx.shadowBlur=25;
+  ctx.shadowColor="#00eaff";
+
+  ctx.fillStyle="#07111d";
+
+  roundRect(
+    player.x,
+    y,
+    player.w,
+    h,
+    10
+  );
+
+  ctx.fill();
+
+  ctx.shadowBlur=0;
+
+  /* neon suit */
+
+  ctx.strokeStyle="#27eaff";
+  ctx.lineWidth=3;
+
+  ctx.stroke();
+
+  /* head */
+
+  if(!player.sliding){
+
+    ctx.fillStyle="#ffd0a5";
+    ctx.beginPath();
+    ctx.arc(
+      player.x+player.w/2,
+      y+11,
+      8,
+      0,
+      Math.PI*2
+    );
+    ctx.fill();
+  }
+
+  /* energy stripe */
+
+  ctx.fillStyle="#ff2dd5";
+  ctx.fillRect(
+    player.x+7,
+    y+h*.55,
+    player.w-14,
+    4
+  );
+}
+
+/* ---------- COINS ---------- */
+
+function drawCoin(c){
+
+  ctx.save();
+
+  ctx.translate(c.x,c.y);
+  ctx.rotate(c.spin);
+
+  ctx.shadowBlur=20;
+  ctx.shadowColor="#ffd400";
+
+  ctx.fillStyle="#ffd21c";
+
+  ctx.beginPath();
+  ctx.arc(0,0,c.r,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.shadowBlur=0;
+
+  ctx.fillStyle="#fff3a0";
+
+  ctx.font="bold 15px Arial";
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+  ctx.fillText("£",0,1);
+
+  ctx.restore();
+}
+
+/* ---------- OBSTACLES ---------- */
+
+function drawObstacle(o){
+
+  ctx.save();
+
+  if(o.type==="spike"){
+
+    ctx.shadowBlur=18;
+    ctx.shadowColor="#ff174f";
+
+    ctx.fillStyle="#ff245d";
+
+    ctx.beginPath();
+
+    ctx.moveTo(o.x,o.y+o.h);
+    ctx.lineTo(o.x+o.w/2,o.y);
+    ctx.lineTo(o.x+o.w,o.y+o.h);
+
+    ctx.closePath();
+    ctx.fill();
+
+  }else{
+
+    ctx.shadowBlur=20;
+    ctx.shadowColor="#ff145f";
+
+    ctx.fillStyle="#361029";
+    ctx.fillRect(o.x,o.y,o.w,o.h);
+
+    ctx.strokeStyle="#ff235d";
+    ctx.lineWidth=3;
+    ctx.strokeRect(o.x,o.y,o.w,o.h);
+
+    ctx.strokeStyle="#ffea2f";
+    ctx.lineWidth=4;
+
+    ctx.beginPath();
+    ctx.moveTo(o.x,o.y+o.h);
+    ctx.lineTo(o.x+o.w,o.y);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+/* ---------- SPAWNING ---------- */
+
+function spawnObstacle(){
+
+  const types=["spike","block","laser"];
+
+  const type=types[
+    Math.floor(Math.random()*types.length)
+  ];
+
+  const x=W+80;
+
+  const y=H-125;
+
+  if(type==="spike"){
+
+    obstacles.push({
+      x,
+      y:y-42,
+      w:48,
+      h:42,
+      type
+    });
+
+  }else if(type==="block"){
+
+    obstacles.push({
+      x,
+      y:y-70,
+      w:50,
+      h:70,
+      type
+    });
+
+  }else{
+
+    obstacles.push({
+      x,
+      y:y-100,
+      w:18,
+      h:100,
+      type
+    });
+  }
+}
+
+function spawnCoins(){
+
+  const baseY=H-190-Math.random()*80;
+
+  const amount=3+Math.floor(Math.random()*5);
+
+  for(let i=0;i<amount;i++){
+
+    coinObjects.push({
+      x:W+100+i*45,
+      y:baseY-Math.sin(i*.8)*25,
+      r:14,
+      spin:0
+    });
+  }
+}
+
+/* ---------- POWERUP ---------- */
+
+function spawnPowerup(){
+
+  powerups.push({
+    x:W+100,
+    y:H-240-Math.random()*100,
+    r:20,
+    type:Math.random()>.5?"shield":"boost"
+  });
+}
+
+function drawPowerup(p){
+
+  ctx.save();
+
+  ctx.shadowBlur=25;
+  ctx.shadowColor=p.type==="shield"
+    ? "#26eaff"
+    : "#ff2dce";
+
+  ctx.fillStyle=p.type==="shield"
+    ? "#25dfff"
+    : "#ff2dce";
+
+  ctx.beginPath();
+  ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle="white";
+  ctx.font="bold 17px Arial";
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+
+  ctx.fillText(
+    p.type==="shield" ? "S" : "⚡",
+    p.x,
+    p.y
+  );
+
+  ctx.restore();
+}
+
+/* ---------- PARTICLES ---------- */
+
+function particle(x,y,color){
+
+  particles.push({
+    x,
+    y,
+    vx:(Math.random()-.5)*8,
+    vy:(Math.random()-.5)*8,
+    life:30+Math.random()*30,
+    color
+  });
+}
+
+function updateParticles(){
+
+  for(let i=particles.length-1;i>=0;i--){
+
+    const p=particles[i];
+
+    p.x+=p.vx;
+    p.y+=p.vy;
+    p.vy+=.15;
+    p.life--;
+
+    ctx.globalAlpha=Math.max(0,p.life/50);
+    ctx.fillStyle=p.color;
+
+    ctx.fillRect(p.x,p.y,4,4);
+
+    ctx.globalAlpha=1;
+
+    if(p.life<=0)
+      particles.splice(i,1);
+  }
+}
+
+/* ---------- COLLISION ---------- */
+
+function collision(a,b){
+
+  return (
+    a.x < b.x+b.w &&
+    a.x+a.w > b.x &&
+    a.y < b.y+b.h &&
+    a.y+a.h > b.y
+  );
+}
+
+function playerBox(){
+
+  const h=player.sliding?34:player.h;
+
+  return {
+    x:player.x+6,
+    y:player.y+(player.h-h),
+    w:player.w-12,
+    h:h-5
+  };
+}
+
+/* ---------- UPDATE ---------- */
+
+function update(){
+
+  distance+=speed;
+
+  speed+=0.0008;
+
+  if(speed>18)
+    speed=18;
+
+  /* movement */
+
+  if(keys["arrowleft"] || keys["a"])
+    player.x-=8;
+
+  if(keys["arrowright"] || keys["d"])
+    player.x+=8;
+
+  const trackLeft=W*.12;
+  const trackRight=W*.88-player.w;
+
+  player.x=Math.max(trackLeft,Math.min(trackRight,player.x));
+
+  /* gravity */
+
+  player.vy+=.8;
+  player.y+=player.vy;
+
+  const ground=H-145;
+
+  if(player.y>=ground){
+
+    player.y=ground;
+    player.vy=0;
+    player.jumping=false;
+  }
+
+  /* timers */
+
+  spawnTimer--;
+
+  if(spawnTimer<=0){
+
+    spawnObstacle();
+
+    spawnTimer=
+      Math.max(
+        28,
+        80-speed*3+Math.random()*45
+      );
+  }
+
+  coinTimer--;
+
+  if(coinTimer<=0){
+
+    spawnCoins();
+
+    coinTimer=70+Math.random()*70;
+  }
+
+  if(Math.random()<.0015)
+    spawnPowerup();
+
+  /* obstacles */
+
+  for(let i=obstacles.length-1;i>=0;i--){
+
+    const o=obstacles[i];
+
+    o.x-=speed;
+
+    if(o.x<-100){
+      obstacles.splice(i,1);
+      continue;
+    }
+
+    if(
+      collision(
+        playerBox(),
+        o
+      )
+    ){
+
+      if(player.invincible<=0){
+
+        lives--;
+        combo=1;
+        player.invincible=100;
+        shake=20;
+
+        for(let j=0;j<25;j++)
+          particle(
+            player.x,
+            player.y,
+            "#ff174f"
+          );
+
+        if(lives<=0){
+          endGame();
+          return;
+        }
+      }
+    }
+  }
+
+  /* coins */
+
+  for(let i=coinObjects.length-1;i>=0;i--){
+
+    const c=coinObjects[i];
+
+    c.x-=speed;
+    c.spin+=.15;
+
+    const dx=
+      c.x-(player.x+player.w/2);
+
+    const dy=
+      c.y-(player.y+player.h/2);
+
+    if(Math.hypot(dx,dy)<35){
+
+      coins++;
+
+      score+=100*combo;
+
+      combo=Math.min(20,combo+1);
+
+      for(let j=0;j<8;j++)
+        particle(c.x,c.y,"#ffd21c");
+
+      coinObjects.splice(i,1);
+
+    }else if(c.x<-50){
+
+      coinObjects.splice(i,1);
+    }
+  }
+
+  /* powerups */
+
+  for(let i=powerups.length-1;i>=0;i--){
+
+    const p=powerups[i];
+
+    p.x-=speed;
+
+    const dx=p.x-(player.x+player.w/2);
+    const dy=p.y-(player.y+player.h/2);
+
+    if(Math.hypot(dx,dy)<40){
+
+      if(p.type==="shield"){
+        player.invincible=300;
+      }else{
+        speed+=4;
+
+        setTimeout(()=>{
+          speed=Math.max(7,speed-4);
+        },3000);
+      }
+
+      score+=500;
+
+      for(let j=0;j<20;j++)
+        particle(
+          p.x,
+          p.y,
+          p.type==="shield"
+            ? "#24eaff"
+            : "#ff2dce"
+        );
+
+      powerups.splice(i,1);
+
+    }else if(p.x<-50){
+      powerups.splice(i,1);
+    }
+  }
+
+  if(player.invincible>0)
+    player.invincible--;
+
+  /* passive score */
+
+  score+=Math.floor(speed/3);
+
+  /* particles */
+
+  updateParticles();
+
+  /* HUD */
+
+  document.getElementById("coins").textContent=coins;
+  document.getElementById("score").textContent=score;
+  document.getElementById("lives").textContent=lives;
+  document.getElementById("combo").textContent=combo;
+}
+
+/* ---------- DRAW ---------- */
+
+function draw(){
+
+  ctx.save();
+
+  if(shake>0){
+
+    ctx.translate(
+      (Math.random()-.5)*shake,
+      (Math.random()-.5)*shake
+    );
+
+    shake*=.88;
+
+    if(shake<.5)
+      shake=0;
+  }
+
+  drawBackground();
+  drawTrack();
+
+  for(const c of coinObjects)
+    drawCoin(c);
+
+  for(const o of obstacles)
+    drawObstacle(o);
+
+  for(const p of powerups)
+    drawPowerup(p);
+
+  drawPlayer();
+
+  ctx.restore();
+
+  /* speed warning */
+
+  if(speed>14){
+
+    const alpha=.08+Math.sin(Date.now()/80)*.04;
+
+    ctx.fillStyle=`rgba(255,0,50,${alpha})`;
+    ctx.fillRect(0,0,W,H);
+
+    ctx.fillStyle="#ff3355";
+    ctx.font="bold 18px Arial";
+    ctx.textAlign="center";
+
+    ctx.fillText(
+      "⚠ EXTREME SPEED",
+      W/2,
+      35
+    );
+  }
+}
+
+/* ---------- GAME LOOP ---------- */
+
+function loop(){
+
+  if(!running)
+    return;
+
+  update();
+  draw();
+
+  requestAnimationFrame(loop);
+}
+
+/* ---------- GAME OVER ---------- */
+
+function endGame(){
+
+  running=false;
+
+  const oldBest=
+    Number(localStorage.getItem("coinRushBest")||0);
+
+  const best=Math.max(oldBest,score);
+
+  localStorage.setItem(
+    "coinRushBest",
+    best
+  );
+
+  document.getElementById("finalScore").textContent=
+    "SCORE: "+score;
+
+  document.getElementById("bestText").textContent=
+    "BEST SCORE: "+best+
+    " • COINS: "+coins;
+
+  document.getElementById("gameOver").style.display="flex";
+}
+
+/* ---------- HELPERS ---------- */
+
+function roundRect(x,y,w,h,r){
+
+  ctx.beginPath();
+
+  ctx.moveTo(x+r,y);
+
+  ctx.arcTo(
+    x+w,y,
+    x+w,y+h,
+    r
+  );
+
+  ctx.arcTo(
+    x+w,y+h,
+    x,y+h,
+    r
+  );
+
+  ctx.arcTo(
+    x,y+h,
+    x,y,
+    r
+  );
+
+  ctx.arcTo(
+    x,y,
+    x+w,y,
+    r
+  );
+
+  ctx.closePath();
+}
+</script>
+
+</body>
+</html>
